@@ -72,7 +72,10 @@ jobs:
           tar -xJf /tmp/ios-toolchain.tar.xz -C "$THEOS/toolchain"
 
           echo "Toolchain contents:"
-          find "$THEOS/toolchain" -maxdepth 4 -type f -name clang -o -name ld | head -30
+          find "$THEOS/toolchain/linux/iphone/bin" \
+            -maxdepth 1 -type f \
+            \( -name clang -o -name ld -o -name ldid -o -name codesign_allocate \) \
+            -print
 
           test -x "$THEOS/toolchain/linux/iphone/bin/clang"
           "$THEOS/toolchain/linux/iphone/bin/clang" --version
@@ -88,18 +91,24 @@ jobs:
           tar -xJf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
 
           echo "Installed SDKs:"
-          ls -lah "$THEOS/sdks"
+          find "$THEOS/sdks" -maxdepth 1 -mindepth 1 -type d -printf '%f\n'
 
           test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
 
       - name: Show Theos environment
         run: |
           set -euxo pipefail
+
           echo "THEOS=$THEOS"
           echo "SDKs:"
-          ls -1 "$THEOS/sdks"
-          echo "Toolchain:"
-          ls -lah "$THEOS/toolchain/linux/iphone/bin" | head -40
+          find "$THEOS/sdks" -maxdepth 1 -mindepth 1 -type d -printf '%f\n'
+
+          echo "Important toolchain files:"
+          for f in clang ld ldid codesign_allocate; do
+            if [ -e "$THEOS/toolchain/linux/iphone/bin/$f" ]; then
+              ls -lh "$THEOS/toolchain/linux/iphone/bin/$f"
+            fi
+          done
 
       - name: Build rootless arm64 package
         run: |
@@ -108,6 +117,7 @@ jobs:
           export THEOS="$GITHUB_WORKSPACE/theos"
 
           make clean
+
           make package FINALPACKAGE=1 \
             THEOS_PACKAGE_SCHEME=rootless \
             ARCHS=arm64 \
@@ -117,9 +127,18 @@ jobs:
         if: always()
         run: |
           echo "packages/:"
-          ls -lah packages/ || true
-          echo ".theos/:"
-          find .theos -maxdepth 3 -type f 2>/dev/null | head -100 || true
+          if [ -d packages ]; then
+            find packages -maxdepth 1 -type f -printf '%f %s bytes\n'
+          else
+            echo "packages directory does not exist"
+          fi
+
+          echo ".theos errors / logs:"
+          if [ -d .theos ]; then
+            find .theos -maxdepth 3 -type f | sed -n '1,100p' || true
+          else
+            echo ".theos directory does not exist"
+          fi
 
       - name: Upload DEB artifact
         uses: actions/upload-artifact@v4
