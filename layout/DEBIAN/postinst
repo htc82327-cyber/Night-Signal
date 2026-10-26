@@ -1,0 +1,33 @@
+#!/bin/sh
+set +e
+
+# Rootless jailbreaks normally provide uicache under /var/jb/usr/bin.
+UICACHE=""
+for candidate in \
+  /var/jb/usr/bin/uicache \
+  /usr/bin/uicache \
+  /var/jb/bin/uicache \
+  /bin/uicache
+do
+  if [ -x "$candidate" ]; then
+    UICACHE="$candidate"
+    break
+  fi
+done
+
+if [ -n "$UICACHE" ]; then
+  "$UICACHE" -a >/dev/null 2>&1 || "$UICACHE" >/dev/null 2>&1 || true
+fi
+
+# Respring so SpringBoard reloads tweak state and newly registered applications.
+if [ -x /var/jb/usr/bin/sbreload ]; then
+  /var/jb/usr/bin/sbreload >/dev/null 2>&1 || true
+elif [ -x /usr/bin/sbreload ]; then
+  /usr/bin/sbreload >/dev/null 2>&1 || true
+elif [ -x /var/jb/usr/bin/killall ]; then
+  /var/jb/usr/bin/killall SpringBoard >/dev/null 2>&1 || true
+elif [ -x /usr/bin/killall ]; then
+  /usr/bin/killall SpringBoard >/dev/null 2>&1 || true
+fi
+
+exit 0
