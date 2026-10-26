@@ -63,25 +63,6 @@ static BOOL EffectsEnabled(void) {
     return Active() && !Suppressed();
 }
 
-static void SavePauseStart(void) {
-    NSMutableDictionary *s = LoadState();
-    s[@"suppressed"] = @YES;
-    s[@"pauseStart"] = @([[NSDate date] timeIntervalSince1970]);
-    SaveState(s);
-}
-
-static void ResumeFromPause(void) {
-    NSMutableDictionary *s = LoadState();
-    NSTimeInterval pauseStart = [s[@"pauseStart"] doubleValue];
-    NSTimeInterval start = [s[@"startTime"] doubleValue];
-    if (pauseStart > 0 && start > 0) {
-        NSTimeInterval pausedFor = MAX(0, [[NSDate date] timeIntervalSince1970] - pauseStart);
-        s[@"startTime"] = @(start + pausedFor);
-    }
-    s[@"suppressed"] = @NO;
-    s[@"pauseStart"] = @0;
-    SaveState(s);
-}
 
 static UIWindowScene *Scene(void) {
     if (@available(iOS 13.0,*)) {
@@ -451,49 +432,172 @@ static void Callback(CFNotificationCenterRef c,void *o,CFStringRef name,const vo
 }
 
 %group SpringBoardHooks
+
 %hook SpringBoard
-- (void)applicationDidFinishLaunching:(id)a{
+
+- (void)applicationDidFinishLaunching:(id)application {
     %orig;
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NStart,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NRollback,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NTest,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NRefresh,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NResume,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NGood,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),NULL,Callback,(__bridge CFStringRef)NBad,NULL,CFNotificationSuspensionBehaviorDeliverImmediately);
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NStart,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NRollback,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NTest,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NRefresh,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NResume,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NGood,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        Callback,
+        (__bridge CFStringRef)NBad,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
+
     StartTimer();
 }
+
 %end
+
 %hook SBIconView
-- (void)layoutSubviews{%orig;ApplyIcon((UIView*)self);}
+
+- (void)layoutSubviews {
+    %orig;
+    ApplyIcon((UIView *)self);
+}
+
 %end
+
 %hook SBRootFolderView
-- (void)layoutSubviews{%orig;ApplyWallpaper((UIView*)self);}
+
+- (void)layoutSubviews {
+    %orig;
+    ApplyWallpaper((UIView *)self);
+}
+
 %end
+
 %hook CSCoverSheetViewController
-- (void)viewDidAppear:(BOOL)a{%orig;LockOverlay(self.view);}
-- (void)viewDidLayoutSubviews{%orig;LockOverlay(self.view);}
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    LockOverlay(self.view);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    LockOverlay(self.view);
+}
+
 %end
+
 %end
 
 %group SettingsHooks
+
 %hook UIViewController
-- (void)viewDidAppear:(BOOL)a{%orig;if(self.view.window)SettingsOverlay(self.view);}
-- (void)viewDidLayoutSubviews{%orig;if(self.view.window)SettingsOverlay(self.view);}
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+
+    if (self.view.window != nil) {
+        SettingsOverlay(self.view);
+    }
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+
+    if (self.view.window != nil) {
+        SettingsOverlay(self.view);
+    }
+}
+
 %end
+
 %end
 
 %group PhotosHooks
+
 %hook UIViewController
-- (void)viewDidAppear:(BOOL)a{%orig;if(self.view.window)PhotosOverlay(self.view);}
-- (void)viewDidLayoutSubviews{%orig;if(self.view.window)PhotosOverlay(self.view);}
-%end
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+
+    if (self.view.window != nil) {
+        PhotosOverlay(self.view);
+    }
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+
+    if (self.view.window != nil) {
+        PhotosOverlay(self.view);
+    }
+}
+
 %end
 
-%ctor{
+%end
+
+%ctor {
     LoadSound();
-    NSString *bid=NSBundle.mainBundle.bundleIdentifier;
-    if([bid isEqualToString:@"com.apple.springboard"])%init(SpringBoardHooks);
-    else if([bid isEqualToString:@"com.apple.Preferences"])%init(SettingsHooks);
-    else if([bid isEqualToString:@"com.apple.mobileslideshow"])%init(PhotosHooks);
+
+    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
+
+    if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
+        %init(SpringBoardHooks);
+    } else if ([bundleIdentifier isEqualToString:@"com.apple.Preferences"]) {
+        %init(SettingsHooks);
+    } else if ([bundleIdentifier isEqualToString:@"com.apple.mobileslideshow"]) {
+        %init(PhotosHooks);
+    }
 }
