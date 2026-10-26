@@ -4,132 +4,164 @@ import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
-files = [
+
+source_files = [
     root / "Tweak.xm",
     root / "NightSignal" / "RootViewController.m",
     root / "PovoZka" / "ChatViewController.m",
 ]
 
-def brace_depth(text):
-    state = "code"
-    esc = False
-    depth = 0
-    i = 0
-    while i < len(text):
-        c = text[i]
-        n = text[i:i+2]
-        if state == "code":
-            if n == "//":
-                state = "line"
-                i += 2
-                continue
-            if n == "/*":
-                state = "block"
-                i += 2
-                continue
-            if c == '"':
-                state = "string"
-                esc = False
-            elif c == "'":
-                state = "char"
-                esc = False
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth < 0:
-                    return depth
-        elif state == "line":
-            if c == "\n":
-                state = "code"
-        elif state == "block":
-            if n == "*/":
-                state = "code"
-                i += 2
-                continue
-        elif state in ("string", "char"):
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif state == "string" and c == '"':
-                state = "code"
-            elif state == "char" and c == "'":
-                state = "code"
-        i += 1
-    return depth
-
 errors = []
 
-for path in files:
+for path in source_files:
     if not path.exists():
-        errors.append(f"missing: {path.relative_to(root)}")
-        continue
+        errors.append(f"missing source: {path.relative_to(root)}")
+
+def strip_strings_and_comments(text):
+    out = []
+    i = 0
+    state = "code"
+    while i < len(text):
+        c = text[i]
+        two = text[i:i+2]
+        if state == "code":
+            if two == "//":
+                state = "line"; out.extend("  "); i += 2; continue
+            if two == "/*":
+                state = "block"; out.extend("  "); i += 2; continue
+            if c == '"':
+                state = "string"; out.append(" "); i += 1; continue
+            if c == "'":
+                state = "char"; out.append(" "); i += 1; continue
+            out.append(c); i += 1; continue
+        if state == "line":
+            if c == "\n":
+                state = "code"; out.append("\n")
+            else:
+                out.append(" ")
+            i += 1; continue
+        if state == "block":
+            if two == "*/":
+                state = "code"; out.extend("  "); i += 2
+            else:
+                out.append("\n" if c == "\n" else " "); i += 1
+            continue
+        if state in ("string","char"):
+            if c == "\\":
+                out.append(" ")
+                if i+1 < len(text):
+                    out.append(" ")
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if (state == "string" and c == '"') or (state == "char" and c == "'"):
+                state = "code"
+            out.append("\n" if c == "\n" else " ")
+            i += 1
+    return "".join(out)
+
+def brace_depth(text):
+    clean = strip_strings_and_comments(text)
+    depth = 0
+    for c in clean:
+        if c == "{": depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth < 0:
+                return depth
+    return depth
+
+for path in source_files:
+    if path.exists():
+        d = brace_depth(path.read_text(encoding="utf-8"))
+        if d != 0:
+            errors.append(f"brace depth {d}: {path.relative_to(root)}")
+
+# Catch Objective-C method bodies accidentally placed inside @interface blocks.
+for path in [
+    root / "NightSignal" / "RootViewController.m",
+    root / "PovoZka" / "ChatViewController.m",
+]:
     text = path.read_text(encoding="utf-8")
-    d = brace_depth(text)
-    if d != 0:
-        errors.append(f"brace depth {d}: {path.relative_to(root)}")
+    for m in re.finditer(r"@interface\b.*?@end", text, flags=re.S):
+        block = m.group(0)
+        if re.search(r"^[+-]\s*\([^)]*\)[^{;\n]*\{", block, flags=re.M):
+            errors.append(f"method implementation inside @interface: {path.relative_to(root)}")
+            break
 
+# APIs known to break this SDK build under -Werror.
+for path in [
+    root / "NightSignal" / "RootViewController.m",
+    root / "PovoZka" / "ChatViewController.m",
+]:
+    text = path.read_text(encoding="utf-8")
+    forbidden = {
+        "contentEdgeInsets": "deprecated UIButton contentEdgeInsets",
+        "progressViewWithProgressViewStyle": "invalid UIProgressView factory selector",
+    }
+    for token, reason in forbidden.items():
+        if token in text:
+            errors.append(f"{reason}: {path.relative_to(root)}")
+
+# Logos structural checks.
 tweak = (root / "Tweak.xm").read_text(encoding="utf-8")
-
-# Logos hooks should never contain method body + %orig compressed onto one line.
-bad_hook_lines = []
-for lineno, line in enumerate(tweak.splitlines(), 1):
-    if re.search(r"^[+-]\s*\([^)]*\).*\{\s*%orig", line):
-        bad_hook_lines.append(lineno)
-if bad_hook_lines:
-    errors.append(f"compressed Logos hook syntax on lines: {bad_hook_lines}")
-
-# Validate group/hook/end structure.
-stack = []
+logos_stack = []
 for lineno, raw in enumerate(tweak.splitlines(), 1):
     line = raw.strip()
     if line.startswith("%group "):
-        stack.append(("group", lineno, line))
+        logos_stack.append(("group", lineno))
     elif line.startswith("%hook "):
-        stack.append(("hook", lineno, line))
+        logos_stack.append(("hook", lineno))
     elif line == "%end":
-        if not stack:
-            errors.append(f"unmatched %end on line {lineno}")
+        if logos_stack:
+            logos_stack.pop()
         else:
-            stack.pop()
-if stack:
-    errors.append("unclosed Logos blocks: " + repr(stack))
+            errors.append(f"unmatched %end at Tweak.xm:{lineno}")
 
+    if re.search(r"^[+-]\s*\([^)]*\).*\{\s*%orig", line):
+        errors.append(f"compressed Logos hook body at Tweak.xm:{lineno}")
 
-# Private SpringBoard classes generated by Logos may only be forward-declared.
-# Direct Objective-C property access such as `self.view` on those types will fail
-# to compile. Cast to a public UIKit superclass first.
-private_forward_hooks = {
-    "CSCoverSheetViewController",
-    "SBIconView",
-    "SBRootFolderView",
-    "SpringBoard",
-}
+if logos_stack:
+    errors.append(f"unclosed Logos blocks: {logos_stack}")
 
+# Catch direct property access on forward-declared private classes.
+private_hooks = {"CSCoverSheetViewController","SBIconView","SBRootFolderView","SpringBoard"}
 current_hook = None
 for lineno, raw in enumerate(tweak.splitlines(), 1):
     line = raw.strip()
     m = re.match(r"%hook\s+([A-Za-z0-9_]+)", line)
     if m:
         current_hook = m.group(1)
-        continue
-    if line == "%end" and current_hook is not None:
+    elif line == "%end" and current_hook:
         current_hook = None
-        continue
-    if current_hook in private_forward_hooks and re.search(r"\bself\.[A-Za-z_]", raw):
+    elif current_hook in private_hooks and re.search(r"\bself\.[A-Za-z_]", raw):
         errors.append(
-            f"direct property access on forward private class {current_hook} "
-            f"at line {lineno}; cast self to a public UIKit class first"
+            f"direct property access on forward private class {current_hook} at Tweak.xm:{lineno}"
         )
 
+# Required files/resources.
+required = [
+    "Makefile", "control", "NightSignalTweak.plist",
+    "NightSignal/Makefile", "NightSignal/Info.plist",
+    "NightSignal/entitlements.plist", "NightSignal/Resources/scream.wav",
+    "PovoZka/Makefile", "PovoZka/Info.plist", "PovoZka/entitlements.plist",
+    ".github/workflows/build.yml",
+]
+for rel in required:
+    if not (root / rel).exists():
+        errors.append(f"missing required file: {rel}")
+
 if errors:
-    print("SOURCE CHECK FAILED")
-    for e in errors:
-        print("-", e)
+    print("PREFLIGHT FAILED")
+    for error in errors:
+        print("-", error)
     sys.exit(1)
 
-print("SOURCE CHECK OK")
-print("- braces balanced")
-print("- no compressed Logos hook bodies")
-print("- %group / %hook / %end balanced")
+print("PREFLIGHT OK")
+print("- Objective-C braces balanced")
+print("- no method bodies inside @interface")
+print("- no known deprecated/invalid UIKit calls")
+print("- Logos blocks balanced")
+print("- no direct private-class self.property access")
+print("- required files/resources present")
