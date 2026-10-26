@@ -1,0 +1,9 @@
+Package: com.thxrealx7.nightsignal
+Name: Night Signal + PovoZka
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Interactive SpringBoard horror story with PovoZka, safe rollback mode and two endings.
+Maintainer: thxrealx7
+Author: thxrealx7
+Section: Tweaks
+Depends: firmware (>= 15.0)
