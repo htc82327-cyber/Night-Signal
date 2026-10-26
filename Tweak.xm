@@ -528,12 +528,16 @@ static void Callback(CFNotificationCenterRef c,void *o,CFStringRef name,const vo
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    LockOverlay(self.view);
+
+    UIViewController *controller = (UIViewController *)self;
+    LockOverlay(controller.view);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    LockOverlay(self.view);
+
+    UIViewController *controller = (UIViewController *)self;
+    LockOverlay(controller.view);
 }
 
 %end
