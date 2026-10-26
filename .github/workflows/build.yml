@@ -1,0 +1,51 @@
+name: Build Night Signal DEB
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check project files
+        run: |
+          test -f Makefile
+          test -f control
+          test -f Tweak.xm
+          test -f NightSignalTweak.plist
+          test -f NightSignal/Makefile
+          test -f PovoZka/Makefile
+          echo "Project structure OK"
+
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-dir: theos
+          theos-src: https://github.com/theos/theos
+          theos-sdks: https://github.com/theos/sdks
+          theos-sdks-branch: master
+
+      - name: Build rootless arm64 DEB
+        run: |
+          export THEOS="${{ github.workspace }}/theos"
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Show built packages
+        run: |
+          ls -lah packages/
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NightSignal-PovoZka-DEB
+          path: packages/*.deb
+          if-no-files-found: error
